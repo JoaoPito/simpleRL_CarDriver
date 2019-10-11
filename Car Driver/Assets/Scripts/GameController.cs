@@ -12,36 +12,41 @@ public class GameController : MonoBehaviour
     public enum MENU
     {
         MAINMENU,
+        MAPLOAD,
         TRAIN,
         RESULTS
     }
 
-    MENU currentMenu = MENU.MAINMENU;
+    public MENU currentMenu = MENU.MAINMENU;
 
     TrackController trackCtrl;
     UI_Controller uiCtrl;   
 
-    [Header("Cars")]    
+    [Header("Cars")]
     string[] brainsToLoad;//This brains should be already sorted by fitness and ready for "implant" when StartGame is called
     string mostFitBrain; // Most fit brain of all generations
+
     [HideInInspector] public float maxFitness;
     [HideInInspector] public float fitLastGen;
     [HideInInspector] public float fitCurGen;
 
+    [SerializeField] static public int NN_hlCount = 10;
+    [SerializeField] static public int NN_inpCount = 5;
+
     public GameObject carPrefab;
     public Vector3 spawnPoint;
 
-    [Header("Generations")]    
-    public bool logGenerations = true;//Logs all brains and fitnesses into a file
-    [HideInInspector] public int generation;
+    [Header("Generations")]
+    [HideInInspector] public int generation;//total generations
+    public int minGenOnTrack = 50;//Min generations per track
+    int genCurTrack = 0;//Generations on this track
 
     public float maxTimeout = 120f;//Max Timeout in seconds
     [HideInInspector] public float currentGenTime = -1;
-   
+
     [HideInInspector] public int nActiveCars = 1;
     int carsReachedObjective = 0;//Essa variavel é incrementada mas não tem utilidade por enquanto
     List<Car_Behaviour> spawnedCars = new List<Car_Behaviour>();
-    public List<Car_Behaviour> sortedSpawnedCars;
 
     //Quantidade de carros por geração
     [Header("Cars per Gen")]
@@ -51,12 +56,12 @@ public class GameController : MonoBehaviour
     int carsPerGen;
 
     [Header("Parents")]
-    [Range(0, 1)] public float minMutationChance = 0.5f;//Its the percentage of random parents selected for the next breed
+    [Range(0, 1)] public float minMutationChance = 0.5f;//Mutation threshold
     [Range(0, 5)] public float mutationRange = 0.1f;
 
     //LOGGING
-    StreamWriter sw;
-    string filename = string.Concat(DateTime.Now.Day, "-", DateTime.Now.Month, "-", DateTime.Now.Year, "-", DateTime.Now.Hour, "_", DateTime.Now.Minute, " NN Log");
+    public bool logGenerations = true;//Logs all brains and fitnesses into a file
+    Log_Controller logCtrl;
 
     //UI
     public float updateUIInterval = 0.3f;
@@ -67,7 +72,13 @@ public class GameController : MonoBehaviour
     {
         trackCtrl = GetComponent<TrackController>();
         uiCtrl = GetComponent<UI_Controller>();
+        logCtrl = GetComponent<Log_Controller>();
 
+        logCtrl.StartLogging();
+    }
+
+    void Start()
+    {
         brainsToLoad = new string[randomParentsCount + totallyRandomCount + Top2Count];
     }
 
@@ -78,7 +89,7 @@ public class GameController : MonoBehaviour
         {            
             if ((currentGenTime >= maxTimeout) || nActiveCars <= 0)
             {
-                EndGame();
+                EndGen();
             }else if (currentGenTime >= 0)
             {
                 currentGenTime += Time.fixedDeltaTime;
@@ -89,20 +100,37 @@ public class GameController : MonoBehaviour
 
         if (cUIInterval > updateUIInterval)
         {
-            sortedSpawnedCars = SortFitness();
+            if (currentMenu == MENU.TRAIN)
+            {
+                spawnedCars = spawnedCars.OrderByDescending(o => o.GetFitness()).ToList();//Sort by fitness
+            }
+
             uiCtrl.UpdateGamePlayUI();
             cUIInterval = 0;
+
+            if (generation > 0)
+            {
+                if (spawnedCars[0].GetFitness() > fitCurGen)
+                {
+                    fitCurGen = spawnedCars[0].GetFitness();
+                }
+            }
         }
         
     }
 
-    public void StartGame()
+    public void StartGen()
     {
-        if(generation==0)
-            trackCtrl.InstantiateTrack(1);
+        if (genCurTrack >= minGenOnTrack || generation==0)//If has passed X generations, change map
+        {
+            trackCtrl.BuildNextMap();
+            spawnPoint = new Vector3(trackCtrl.trackStart.position.x, trackCtrl.trackStart.position.y + spawnPoint.y, trackCtrl.trackStart.position.z);
+            Camera.main.transform.root.position = new Vector3(trackCtrl.trackStart.position.x, trackCtrl.trackStart.position.y + Camera.main.transform.root.position.y, trackCtrl.trackStart.position.z);
+            genCurTrack = 0;
+        }
 
         nActiveCars = 0;
-        currentGenTime = 0;        
+        currentGenTime = 0;
         fitLastGen = fitCurGen;
         fitCurGen = 0;
         generation++;
@@ -116,25 +144,25 @@ public class GameController : MonoBehaviour
 
         for (int i = 0; i < brainsToLoad.Length; i++)
         {
-            Car_Behaviour.BrainType brainType = Car_Behaviour.BrainType.RandomParents;
-            
+            NN.TYPE brainType = NN.TYPE.RandomParents;
+
             if (i < randomParentsCount)//Random Parents Generation
             {
-                brainType = Car_Behaviour.BrainType.RandomParents;
+                brainType = NN.TYPE.RandomParents;
             }
             else if (i < randomParentsCount + totallyRandomCount)//Totally Random Generation
             {
-                brainType = Car_Behaviour.BrainType.TotallyRandom;
+                brainType = NN.TYPE.TotallyRandom;
             }
             else if (i < randomParentsCount + totallyRandomCount + Top2Count)//Top2 Generation
             {
-                brainType = Car_Behaviour.BrainType.TOP2;
+                brainType = NN.TYPE.TOP2;
             }
 
             spawnedCars.Add(InstantiateCar(spawnPoint, brainsToLoad[i], "car " + i.ToString(), brainType));
             nActiveCars++;
         }
-        
+
         uiCtrl.UpdateGamePlayUI();
 
         currentMenu = MENU.TRAIN;
@@ -144,9 +172,9 @@ public class GameController : MonoBehaviour
     {
         nActiveCars--;
 
-        if (car.currentFitness > fitCurGen)
+        if (car.GetFitness() > fitCurGen)
         {
-            fitCurGen = car.currentFitness;
+            fitCurGen = car.GetFitness();
         }
 
         if (endReached)
@@ -155,16 +183,16 @@ public class GameController : MonoBehaviour
         }
     }
 
-    public void EndGame()
+    public void EndGen()
     {
         currentGenTime = -1;
-        
-        spawnedCars = SortFitness();
+
+        spawnedCars = spawnedCars.OrderByDescending(o => o.GetFitness()).ToList();//Sort
 
         if (fitCurGen > maxFitness)
         {
             mostFitBrain = spawnedCars[0].ExtractBrain();
-            Debug.Log("mostfitbrain=" + mostFitBrain + "fitness: "+ fitCurGen);
+            Debug.Log("mostfitbrain=" + mostFitBrain + "fitness: " + fitCurGen);
             maxFitness = fitCurGen;
         }
 
@@ -172,11 +200,11 @@ public class GameController : MonoBehaviour
         uiCtrl.UpdateGamePlayUI();
 
         //Begin Next Generation
-        
+
         NextGen(spawnedCars);
-        StartGame();
+        StartGen();
     }
-    
+
     //Controls the generation of the next children
     void NextGen(List<Car_Behaviour> lastGen)
     {
@@ -184,25 +212,24 @@ public class GameController : MonoBehaviour
 
         brainsToLoad = new string[carsPerGen];
 
-        //Generates by random parents
-        for(int i = 1;i< brainsToLoad.Length-1;i++)
-        {
-            if(i< randomParentsCount)//Random Parents Generation
+        for (int i = 1; i < brainsToLoad.Length - 1; i++)
+        {            
+            if (i < randomParentsCount + totallyRandomCount)//Totally Random Generation
+            {
+                brainsToLoad[i] = ""; //When a null brain is loaded, it automatically creates a random one
+            }
+            else if (i < randomParentsCount)//Random Parents Generation
             {
                 int parent1 = UnityEngine.Random.Range(0, lastGen.Count);
                 int parent2 = UnityEngine.Random.Range(0, lastGen.Count);
 
-                brainsToLoad[i] = ChildGen(lastGen[parent1].ExtractBrain(), lastGen[parent2].ExtractBrain());
+                brainsToLoad[i] = ChildGen(lastGen[parent1].ExtractBrain(), lastGen[parent2].ExtractBrain()) + "r";
             }
-            else if(i < randomParentsCount + totallyRandomCount)//Totally Random Generation
+            else if (i < randomParentsCount + totallyRandomCount + Top2Count)//Top2 Generation
             {
-                brainsToLoad[i] = ""; //When a null brain is loaded, it automatically creates a random one
+                brainsToLoad[i] = ChildGen(lastGen[0].ExtractBrain(), lastGen[1].ExtractBrain()) + "t";
             }
-            else if(i < randomParentsCount + totallyRandomCount + Top2Count)//Top2 Generation
-            {
-                brainsToLoad[i] = ChildGen(lastGen[0].ExtractBrain(), lastGen[1].ExtractBrain());
-            }
-        }           
+        }
 
         brainsToLoad[brainsToLoad.Length - 1] = mostFitBrain;//The fittest brain is always at last index
     }
@@ -221,7 +248,7 @@ public class GameController : MonoBehaviour
 
             if (mutationChance > minMutationChance)
             {
-                ret += (swapGenes == 1) ? brain2Buf[i] : brain1Buf[i]+";";
+                ret += (swapGenes == 1) ? brain2Buf[i] : brain1Buf[i] + ";";
             }
             else
             {
@@ -229,15 +256,15 @@ public class GameController : MonoBehaviour
                 float retN = (swapGenes == 1) ? float.Parse(brain2Buf[i]) : float.Parse(brain1Buf[i]);
                 retN += UnityEngine.Random.Range(-mutationRange, mutationRange);
 
-                ret += retN.ToString() +";";
+                ret += retN.ToString() + ";";
             }
         }
-        
-        ret = ret.TrimEnd(';');
+
+        //ret = ret.TrimEnd(';');
         return ret;
     }
-    
-    Car_Behaviour InstantiateCar(Vector3 spawnPoint,string brain,string name,Car_Behaviour.BrainType brainType)
+        
+    Car_Behaviour InstantiateCar(Vector3 spawnPoint,string brain,string name,NN.TYPE brainType)
     {
         Car_Behaviour behaviour = Instantiate(carPrefab,spawnPoint,Quaternion.identity).GetComponent<Car_Behaviour>();
 
@@ -246,7 +273,7 @@ public class GameController : MonoBehaviour
 
         behaviour.transform.name = name;
         behaviour.objective = trackCtrl.trackEnd.position;
-        behaviour.brainType = brainType;
+        //behaviour.type = brainType;
 
         if (brain!=null)
             behaviour.ActivateBrain(brain);
@@ -274,42 +301,56 @@ public class GameController : MonoBehaviour
         return behaviour;
     }
 
-    List<Car_Behaviour> SortFitness()
+    Car_Behaviour InstantiateCar(Vector3 spawnPoint, NN nN, string name)
     {
-        List<Car_Behaviour> sortedList = spawnedCars.OrderByDescending(o => o.currentFitness).ToList();
+        Car_Behaviour behaviour = Instantiate(carPrefab, spawnPoint, Quaternion.identity).GetComponent<Car_Behaviour>();
+        
+        if (nN != null)
+            behaviour.ActivateBrain(nN);
+        else
+            behaviour.ActivateBrain();
 
-        return sortedList;
+        behaviour.transform.name = name;
+        behaviour.objective = trackCtrl.trackEnd.position;
+
+        behaviour.active = true;
+        behaviour.AIControlled = true;
+
+        return behaviour;
+    }
+
+    public Car_Behaviour GetCarByNN(NN neuralNet)
+    {
+        Car_Behaviour[] cars = FindObjectsOfType<Car_Behaviour>();
+
+        for(int i = 0; i < cars.Length; i++)
+        {
+            if(cars[i].GetNN() == neuralNet)
+            {
+                return cars[i];
+            }
+        }
+
+        return null;
+    }
+
+    public Car_Behaviour GetMostFitCar()
+    {
+        return (spawnedCars.Count<=0)?null: spawnedCars[0];
     }
 
     //Logging
     void LogGenerationIntoFile()
-    {
-        string[] brainsRegistered = brainsToLoad;
-
-        StreamWriter sw;
-        string fn = "NNLogs\\"+ filename + '_' + generation + ".txt";
-
-        if (File.Exists(fn))
-        {
-            Debug.LogWarning("Log File already exists!");
-            return ;
-        }
-        sw = File.CreateText(fn);
-
-        Debug.Log("File saved to: " + fn);
-
-        sw.WriteLine(string.Concat("Generation: ", generation, " | maxFitness: ", maxFitness, " | maxFitnessGen: ", fitLastGen, " | maxFitnessGenBuf: ", fitCurGen,"\n",
+    {        
+        logCtrl.LogLine(string.Concat("Generation: ", generation, " | maxFitness: ", maxFitness, " | maxFitnessGen: ", fitLastGen, " | maxFitnessGenBuf: ", fitCurGen,"\n",
                                     "N TotallyRandom: ",totallyRandomCount," | N RandomParents: ",randomParentsCount," | N Top2: ",Top2Count, " | Min Mutation: ",minMutationChance, "\n", "\n",
                                     "Index|Brain Type|Fitness|BrainData"));
 
-
-
         for (int i =0; i < spawnedCars.Count; i++)
         {
-            sw.WriteLine(string.Concat(i,"|", spawnedCars[i].brainType, "|", spawnedCars[i].currentFitness,  "|", spawnedCars[i].ExtractBrain()));
-        }
-        
-        //sw.Close();        
+            NN neuralNet = spawnedCars[i].GetNN();
+            logCtrl.LogLine(string.Concat(i,"|", neuralNet.type, "|", neuralNet.GetFitness(),  "|", neuralNet.ExtractBrain()));
+        }    
     }
     
 }

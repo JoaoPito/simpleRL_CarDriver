@@ -7,17 +7,9 @@ using UnityEngine.UI;
 //[RequireComponent(typeof(Rigidbody))]
 public class Car_Behaviour : MonoBehaviour
 {
-
-    public enum BrainType
-    {
-        TotallyRandom,
-        RandomParents,
-        TOP2
-    }
-
+    
     [Header("AI")]
     NN neuralNet = new NN();
-    public BrainType brainType = BrainType.TotallyRandom;
 
     public bool active = false;
     public bool AIControlled = false;
@@ -25,9 +17,9 @@ public class Car_Behaviour : MonoBehaviour
     public float aiAcceleration = 0.75f;
     public float steering = 0;
 
-    [Header("Fitness")]
-    public float currentFitness = 0;
-    List<float> fitnessSamples = new List<float>();
+    [Header("Fitness Calc")]
+    float[] fitnessSamples = new float[0];
+    public int nFitSamples = 10;
     [Range(0.01f, 2f)] public float fitSamplesInterval = 1f;
     float cSamplesInterval = 0;
 
@@ -54,11 +46,13 @@ public class Car_Behaviour : MonoBehaviour
 
     void Awake()
     {
-        neuralNet = new NN(5, 4);
+        neuralNet = new NN(5, 10);
 
         childRender = GetComponentsInChildren<Renderer>();
 
         startPos = transform.position;
+
+        fitnessSamples = new float[nFitSamples];
     }
 
     void LateUpdate()
@@ -79,7 +73,7 @@ public class Car_Behaviour : MonoBehaviour
                 torque = aiAcceleration * maxPower * 250 * Time.deltaTime;                
                 brake = 0;   
                 
-                if (Vector3.Distance(transform.position, objective) < 2)
+                if (Vector3.Distance(transform.position, objective) < 5)
                 {
                     Inactive(true);
                 }
@@ -111,20 +105,26 @@ public class Car_Behaviour : MonoBehaviour
 
     //***Fitness Control***
     void CalculateFitness()
-    {        
-        float lastFitnessSample = CaptureFitness(CalculateRaycasts());
-        fitnessSamples.Add(lastFitnessSample);
+    {
+        float lastSample = CaptureFitness(CalculateRaycasts());
 
         //Fitness Average Calculation
         float avg = 0;
 
-        for(int i = 0; i < fitnessSamples.Count; i++)
+        for(int i = fitnessSamples.Length-1; i > 0; i--)
         {
-            avg += fitnessSamples[i];
+            fitnessSamples[i] = fitnessSamples[i - 1];
+            avg += fitnessSamples[i];            
         }
 
-        avg = avg / fitnessSamples.Count;
-        currentFitness = avg;
+        fitnessSamples[0] = lastSample;
+        avg += fitnessSamples[0];
+
+        avg = avg / nFitSamples;
+
+        avg = Mathf.Clamp(avg, 0, 15);
+        
+        neuralNet.SetFitness(avg);
     }
 
     float CaptureFitness(float[] inputs)
@@ -137,11 +137,17 @@ public class Car_Behaviour : MonoBehaviour
             raycastDist += inputs[i];
         }
 
-        raycastDist = (raycastDist / inputs.Length)/10;
+        raycastDist = (raycastDist / inputs.Length);
 
         //Distance Calculations
         float objectiveDist = (Vector3.Distance(startPos, objective) - Vector3.Distance(transform.position, objective)) / Vector3.Distance(startPos, objective);
+        
         return objectiveDist * raycastDist;
+    }
+
+    public float GetFitness()
+    {
+        return neuralNet.GetFitness();
     }
 
     float[] CalculateRaycasts()
@@ -184,22 +190,10 @@ public class Car_Behaviour : MonoBehaviour
         AIControlled = true;
         active = true;
 
-        switch (brainType)
-        {
-            case BrainType.TotallyRandom:
-                ColourSelf(Color.red);
-                break;
-
-            case BrainType.RandomParents:
-                ColourSelf(Color.green);
-                break;
-
-            case BrainType.TOP2:
-                ColourSelf(Color.yellow);
-                break;
-        }
+        ChangeTypeColor();
     }
 
+    //Não usado
     public void ActivateBrain(float[][] hlWeights, float[] hlBiases, float[] OWeights, float OBiases)
     {
         neuralNet.InitHiddenLayers(hlWeights, hlBiases, OWeights, OBiases);
@@ -209,11 +203,23 @@ public class Car_Behaviour : MonoBehaviour
         AIControlled = true;
         active = true;
 
+        ChangeTypeColor();
+    }
+
+    public void ActivateBrain(NN nN)
+    {
+        neuralNet = nN;
+
+        if (neuralNet == null)
+            Debug.LogError(transform.name + " NN null");
+
+        ChangeTypeColor();
     }
 
     public void ActivateBrain()
     {
-        neuralNet.InitHiddenLayers(4);
+        Debug.Log("ActivateBrain Random");
+        neuralNet.InitHiddenLayers(10);
 
         transform.tag = "PlayerActive";
 
@@ -224,6 +230,11 @@ public class Car_Behaviour : MonoBehaviour
     public string ExtractBrain()
     {
         return neuralNet.ExtractBrain();
+    }
+
+    public NN GetNN()
+    {
+        return neuralNet;
     }
 
     //***State Control***
@@ -263,12 +274,30 @@ public class Car_Behaviour : MonoBehaviour
         }
     }
 
-    //***UI***
+    //***UI/Graphics***
     public void UpdateUI()
     {
-        statsText.text = string.Concat("Fitness:" + currentFitness.ToString() + "\n" + 
+        statsText.text = string.Concat("Fitness:" + neuralNet.GetFitness().ToString() + "\n" + 
                                         "active:" + active + "\n" +
                                         "steering: " + steering + "\n" +
-                                        brainType.ToString());
+                                        neuralNet.type.ToString());
+    }
+
+    void ChangeTypeColor()
+    {
+        switch (neuralNet.type)
+        {
+            case NN.TYPE.TotallyRandom:
+                ColourSelf(Color.red);
+                break;
+
+            case NN.TYPE.RandomParents:
+                ColourSelf(Color.green);
+                break;
+
+            case NN.TYPE.TOP2:
+                ColourSelf(Color.yellow);
+                break;
+        }
     }
 }

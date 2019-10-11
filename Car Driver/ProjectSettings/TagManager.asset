@@ -9,6 +9,7 @@ TagManager:
   - Road
   - RoadBarrier
   - RoadEnd
+  - BuildModeIndic
   layers:
   - Default
   - TransparentFX

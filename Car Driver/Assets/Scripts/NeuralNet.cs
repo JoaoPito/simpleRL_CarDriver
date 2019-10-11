@@ -13,8 +13,17 @@ namespace NeuralNet
         float[] _outputW;
         float _outputB;
 
-        float[] _fitness;
+        float _fitness;
+
         float[] _inputs;
+
+        public enum TYPE
+        {
+            TotallyRandom,
+            RandomParents,
+            TOP2
+        }
+        public TYPE type = TYPE.TotallyRandom;
 
         public NN()
         {
@@ -53,7 +62,7 @@ namespace NeuralNet
                 }
             }
 
-            //Debug.Log("Random Brain Loaded! Weights: " + _hLayerW[0][0] + "/" + _hLayerW[0][1] + "/" + _hLayerW[1][0] + "/" + _hLayerW[1][1] + "len= " + _hLayerW.Length* _hLayerW[0].Length + " Biases: " + _hLayerB.Length + " Ow: " + _outputW + " Ob: " + _outputB);
+            //Debug.Log("Random Brain Loaded! Weights: " + _hLayerW[0][0] + "/" + _hLayerW[0][1] + "/" + _hLayerW[1][0] + "/" + _hLayerW[1][1] + "len= " + _hLayerW.Length.ToString() + _hLayerW[0].Length.ToString() + " Biases: " + _hLayerB.Length + " Ow: " + _outputW + " Ob: " + _outputB);
         }
         
         //Inicia uma RN com valores predeterminados
@@ -89,39 +98,71 @@ namespace NeuralNet
 
                 string[] parsedBrain = brain.Split(';');
 
-                outputBias = float.Parse(parsedBrain[parsedBrain.Length - 1]);
+                // outputBias = float.Parse(parsedBrain[parsedBrain.Length - 2]);
 
-                outputWeight[3] = float.Parse(parsedBrain[parsedBrain.Length - 2]);
-                outputWeight[2] = float.Parse(parsedBrain[parsedBrain.Length - 3]);
-                outputWeight[1] = float.Parse(parsedBrain[parsedBrain.Length - 4]);
-                outputWeight[0] = float.Parse(parsedBrain[parsedBrain.Length - 5]);
+                switch (parsedBrain[parsedBrain.Length - 1])
+                {
+                    case "r":
+                        type = TYPE.RandomParents;
+                        break;
 
-                HLbiases[3] = float.Parse(parsedBrain[parsedBrain.Length - 6]);
-                HLbiases[2] = float.Parse(parsedBrain[parsedBrain.Length - 7]);
-                HLbiases[1] = float.Parse(parsedBrain[parsedBrain.Length - 8]);
-                HLbiases[0] = float.Parse(parsedBrain[parsedBrain.Length - 9]);
+                    case "t":
+                        type = TYPE.TOP2;
+                        break;
+
+                    default:
+                        type = TYPE.TotallyRandom;
+                        break;
+                }
 
                 int a = 0;
-
-                for (int i = 0; i < HLweights.Length; i++)
+                while(a < parsedBrain.Length-1)
                 {
-                    HLweights[i] = new float[_inputs.Length];
-
-                    for (int j = 0; j < HLweights[i].Length; j++)
+                    if (a < (_hLayer.Length * _inputs.Length) - 1)
                     {
-                        HLweights[i][j] = float.Parse(parsedBrain[a]);
+                        for (int i = 0; i < HLweights.Length; i++)
+                        {
+                            HLweights[i] = new float[_inputs.Length];
 
+                            for (int j = 0; j < HLweights[i].Length; j++)
+                            {
+                                //Debug.LogWarning(a + " hlW | tot: " + (_hLayer.Length * _inputs.Length));
+
+                                HLweights[i][j] = float.Parse(parsedBrain[a]);
+                                a++;                                
+                            }
+                        }
+                    }
+                    else if (a < ((_hLayer.Length * _inputs.Length) + HLbiases.Length))
+                    {
+                        //Debug.LogWarning(a + " hlB | i= " + (a - (_hLayer.Length * _inputs.Length)) + " < Fi: " + (((_hLayer.Length * _inputs.Length) + HLbiases.Length)) + " | tot: " + HLbiases.Length);
+
+                        HLbiases[a - (_hLayer.Length * _inputs.Length)] = float.Parse(parsedBrain[a]);
+                        a++;
+                    }
+                    else if (a < ((_hLayer.Length * _inputs.Length) + HLbiases.Length) + outputWeight.Length)
+                    {
+                        //Debug.LogWarning(a + " oW | i= " + (a - ((_hLayer.Length * _inputs.Length) + HLbiases.Length)) + " < Fi: " + (((_hLayer.Length * _inputs.Length) + HLbiases.Length) + outputWeight.Length) + " | tot: " + outputWeight.Length);
+
+                        outputWeight[a - ((_hLayer.Length * _inputs.Length) + HLbiases.Length)] = float.Parse(parsedBrain[a]);
+                        a++;
+                    }
+                    else
+                    {
+                        Debug.LogWarning(parsedBrain[a] + " oB | i= " + a);
+
+                        outputBias = float.Parse(parsedBrain[a]);
                         a++;
                     }
                 }
-
-                //Debug.LogWarning("InitHiddenLayers: brain: " + brain + " bias loaded: " + HLbiases[0] + "," + HLbiases[1] + " BrainArrayBias: " + parsedBrain[parsedBrain.Length - 6] + "," + parsedBrain[parsedBrain.Length - 5] + " Last HLWeight: " + HLweights[3][4]);
                 
+                //Debug.LogWarning("InitHiddenLayers: brain: " + brain + " bias loaded: " + HLbiases[0] + "," + HLbiases[1] + " BrainArrayBias: " + parsedBrain[parsedBrain.Length - 6] + "," + parsedBrain[parsedBrain.Length - 5] + " Last HLWeight: " + HLweights[3][4]);
+
                 InitHiddenLayers(HLweights, HLbiases, outputWeight, outputBias);
             }
         }
 
-            //Calcula a Rede Neural por inteiro e retorna o output
+        //Calcula a Rede Neural por inteiro e retorna o output
         public float CalculateNN(float[] inputs)
         {
             float ret = 0;
@@ -181,14 +222,13 @@ namespace NeuralNet
             return ret;
         }
 
+        //Brain conversion,etc...
         public string ExtractBrain()
         {
             string brain = "";
             int brainSize = _hLayerW.Length + _hLayerB.Length +_outputW.Length + 1;
-            Debug.LogWarning(brainSize);
-
-            int a = 0;
-
+            //Debug.LogWarning(brainSize);
+            
             for(int i =0; i < brainSize; i++)
             {
                 if (i < _hLayerW.Length)//Iterates over the hl weights
@@ -212,13 +252,29 @@ namespace NeuralNet
                 }
             }
 
-            Debug.LogWarning("Extract Brain: ret: " + brain + "size: " + brain.ToCharArray().Length);
+            //Debug.LogWarning("Extract Brain: ret: " + brain + "size: " + brain.ToCharArray().Length);
             return brain;
         }
 
         public (float[][],float[],float[],float) ExtractBrainFloat()
         {
-            return (_hLayerW,_hLayerB,_outputW,_outputB);
+            return (_hLayerW, _hLayerB, _outputW, _outputB);
+        }
+
+        public int HLCount()
+        {
+            return _hLayer.Length;
+        }
+
+        //Fitness
+        public void SetFitness(float value)
+        {
+            _fitness = value;
+        }
+
+        public float GetFitness()
+        {
+            return _fitness;
         }
     }
 }

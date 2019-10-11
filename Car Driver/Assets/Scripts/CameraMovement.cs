@@ -37,5 +37,15 @@ public class CameraMovement : MonoBehaviour
         {
             camScr.SetTarget(null);
         }
+
+        if (Input.GetKeyUp(KeyCode.Tab))
+        {
+            SetLookCamActive(!camScr.enabled);
+        }
+    }
+
+    public void SetLookCamActive(bool active)
+    {
+        camScr.enabled = active;
     }
 }

@@ -2,28 +2,39 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 
 public class UI_Controller : MonoBehaviour
 {
 
     GameController gameCtrl;
+    TrackController trackCtrl;
+
+    bool paused = false;
+
+    Car_Behaviour mostFitCar;
+
+    [Header("Cameras")]
+    public UnityStandardAssets.Cameras.FreeLookCam mainCam;
+    public Camera topdownCam;    
 
     [Header("Main Menu")]
     public Canvas MainMenuCanvas;
 
+    [Header("Map Selection")]
+    public GameObject mapContent;
+    public Transform mapSVContent;
+    public float mapContentSpacing = 40;
+
+    public Dropdown mapSeqMode;
+    public Slider minGenSlider;
+    public Text minGenText;
 
     [Header("In Action")]
     public Canvas GameplayCanvas;
 
     public Text statsText;
     public Slider outputSlider;
-    
-    bool paused = false;
-
-    [Header("Cameras")]
-    public UnityStandardAssets.Cameras.FreeLookCam mainCam;
-
-    public Camera topdownCam;
 
     public Slider timeSlider;
     public Text timeText;
@@ -34,8 +45,9 @@ public class UI_Controller : MonoBehaviour
     public Slider TOPCountSlider;
 
     public Slider mutChanceSlider;
-
-    public InputField maxTimeInput;
+    
+    public Text maxTimetext;
+    public Slider maxTimeSlider;
 
     public Text RPCountText;
     public Text TRCountText;
@@ -43,12 +55,11 @@ public class UI_Controller : MonoBehaviour
 
     public Text mutChanceText;
 
-    public Text maxTimetext;
-
     // Start is called before the first frame update
     void Awake()
     {
         gameCtrl = GetComponent<GameController>();
+        trackCtrl = GetComponent<TrackController>();
     }
 
     // Update is called once per frame
@@ -69,29 +80,30 @@ public class UI_Controller : MonoBehaviour
         TRCountChange();
         TOPCountChange();
         MutChanceChange();
+
+        DrawMapList();
     }
 
     private void Update()
     {
-        if (Input.GetKeyUp(KeyCode.C) && gameCtrl.sortedSpawnedCars.Count > 0)
+        mostFitCar = gameCtrl.GetMostFitCar();
+        if (Input.GetKeyUp(KeyCode.C) && mostFitCar != null)
         {
-            if(gameCtrl.sortedSpawnedCars[0] != null)
-                mainCam.SetTarget(gameCtrl.sortedSpawnedCars[0].transform);
+            if(mostFitCar != null)
+                mainCam.SetTarget(mostFitCar.transform);
         }
 
-        if (Input.GetMouseButtonDown(1))
+        /*if (Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.Tab))
         {
             mainCam.enabled = !mainCam.enabled;
-        }
+        }*/
 
-        if (gameCtrl.sortedSpawnedCars.Count > 0)
-        {
-            if (gameCtrl.sortedSpawnedCars[0] != null)
+        
+            if (mostFitCar != null)
             {
-                outputSlider.value = gameCtrl.sortedSpawnedCars[0].steering;
-                topdownCam.transform.position = new Vector3(gameCtrl.sortedSpawnedCars[0].transform.position.x, 10, gameCtrl.sortedSpawnedCars[0].transform.position.z);
+                outputSlider.value = mostFitCar.steering;
+                topdownCam.transform.position = new Vector3(mostFitCar.transform.position.x, 10, mostFitCar.transform.position.z);
             }
-        }
     }
 
     public void UpdateGamePlayUI()
@@ -101,16 +113,86 @@ public class UI_Controller : MonoBehaviour
         statsText.text = string.Concat("Geração: ", gameCtrl.generation, "\n",
                          "Max Fitness: ", gameCtrl.maxFitness, "\n",
                          "Fitness Ult. Geração: ", gameCtrl.fitLastGen, "\n",
-                         "Fitness Geração: ", (gameCtrl.sortedSpawnedCars.Count > 0) ? gameCtrl.sortedSpawnedCars[0].currentFitness.ToString() : "", "\n",
+                         "Fitness Geração: ", (mostFitCar != null) ? mostFitCar.GetNN().GetFitness().ToString() : "", "\n",
                          "Carros Restantes: ", gameCtrl.nActiveCars , "\n" ,
                          "Tempo Restante(seg): ", TimeLeft.ToString());
+    }
+
+    public void UpdateMapUI()
+    {
+        Toggle[] toggles = mapSVContent.GetComponentsInChildren<Toggle>();
+        trackCtrl.loadedMaps = new List<string>();
+
+        ChangeMinGenerations();
+
+        for (int i = 0; i < toggles.Length; i++)
+        {
+            if (toggles[i].isOn)
+            {
+                string loadedMap = trackCtrl.LoadMap(trackCtrl.allMapFiles[i]);
+                trackCtrl.loadedMaps.Add(loadedMap);
+                //Debug.Log(trackCtrl.allMapFiles[i] + " Added");
+            }            
+        }
+    }
+
+    public void MaxTimeChange()
+    {
+        gameCtrl.maxTimeout = maxTimeSlider.value;
+
+        maxTimetext.text = string.Concat("Tempo Máx.(seg): ", maxTimeSlider.value.ToString());
+    }
+
+    //Map Select Functions
+    void DrawMapList()
+    {
+        int mapQuant = trackCtrl.allMapFiles.Length;
+        Transform contObj;
+
+        for(int i = 0; i < mapQuant; i++)
+        {            
+            contObj = Instantiate(mapContent,Vector3.zero,Quaternion.identity).transform;
+            contObj.SetParent(mapSVContent);
+
+            Vector3 pos = new Vector3(0,(i * -mapContentSpacing) - 20,0);
+            contObj.localPosition = pos;
+
+            mapSVContent.GetComponent<RectTransform>().sizeDelta = new Vector2(mapSVContent.GetComponent<RectTransform>().sizeDelta.x, i * mapContentSpacing);
+
+            contObj.Find("Label").GetComponent<Text>().text = trackCtrl.allMapFiles[i];
+            contObj.GetComponent<Toggle>().onValueChanged.AddListener(delegate { UpdateMapUI(); });
+        }
+    }
+    
+    public void MapSelection(int mapN)
+    {
+        Debug.Log(mapN);
+        trackCtrl.loadedMaps.Add(trackCtrl.allMapFiles[mapN]);
+    }
+
+    public void ChangeMapMode()
+    {
+        if (mapSeqMode.value == 0)//Random
+        {
+            trackCtrl.random = true;
+        }
+        else//Seq
+        {
+            trackCtrl.random = false;
+        }
+    }
+
+    public void ChangeMinGenerations()
+    {
+        gameCtrl.minGenOnTrack = Mathf.RoundToInt(minGenSlider.value);
+        minGenText.text = string.Concat("Nº min de ger. por mapa: " + minGenSlider.value.ToString());
     }
 
     //Main Menu Button Functions
     public void StartGameBut()
     {
         MainMenuCanvas.gameObject.SetActive(false);
-        gameCtrl.StartGame();
+        gameCtrl.StartGen();
 
         GameplayCanvas.gameObject.SetActive(true);
     }
@@ -145,5 +227,25 @@ public class UI_Controller : MonoBehaviour
         mutChanceText.text = string.Concat("Chance mutação: ", Mathf.RoundToInt(mutChanceSlider.value).ToString(),"%");
     }
 
+    public void MapBuilderBut()
+    {
+        SceneManager.LoadScene(1);
+    }
+
+    //Pause Menu
+    public void NextGen()
+    {
+        gameCtrl.EndGen();
+    }
+
+    public void MainMenu()
+    {
+        SceneManager.LoadScene(0);
+    }
+
+    private void OnDestroy()
+    {
+        
+    }
 
 }
